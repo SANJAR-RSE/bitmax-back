@@ -1,4 +1,4 @@
-import { sweepTezcheckPayments } from '../services/tezcheckPayments';
+import { sweepHamyonPayments } from '../services/hamyonPayments';
 import { Transaction } from '../models/Transaction';
 import { EscrowHold } from '../models/EscrowHold';
 import { Product } from '../models/Product';
@@ -30,7 +30,7 @@ const timers: NodeJS.Timeout[] = [];
  */
 export async function expirePendingTransactions(): Promise<number> {
   const now = new Date();
-  const stale = await Transaction.find({ paymentProvider: { $ne: 'tezcheck' }, status: 'pending_payment', expireAt: { $lt: now } })
+  const stale = await Transaction.find({ paymentProvider: { $nin: ['tezcheck', 'hamyon'] }, status: 'pending_payment', expireAt: { $lt: now } })
     .limit(500)
     .select('_id productId buyerId')
     .populate('buyerId', 'telegramId')
@@ -255,7 +255,7 @@ export async function alertUnmatchedPayments(): Promise<number> {
 }
 
 const JOBS: Job[] = [
-  { name: 'tezcheckPayments', intervalMs: 60_000, run: sweepTezcheckPayments },
+  { name: 'hamyonPayments', intervalMs: 60_000, run: sweepHamyonPayments },
   { name: 'expirePendingTransactions', intervalMs: 60_000, run: async () => void (await expirePendingTransactions()) },
   { name: 'settleDueEscrows', intervalMs: 5 * 60_000, run: async () => void (await settleDueEscrows()) },
   { name: 'alertUnmatchedPayments', intervalMs: 15 * 60_000, run: async () => void (await alertUnmatchedPayments()) },

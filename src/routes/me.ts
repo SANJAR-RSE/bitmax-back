@@ -15,6 +15,7 @@ import {
   AlreadyProcessedError,
   ProductUnavailableError,
   ForbiddenError,
+  PaymentProviderError,
 } from '../services/paymentService';
 import { payoutService, InsufficientBalanceError } from '../services/payoutService';
 import { ledgerService } from '../services/ledgerService';
@@ -57,6 +58,7 @@ function fail(res: Response, error: any, fallback = 'Xatolik yuz berdi') {
   if (error instanceof ForbiddenError) return res.status(403).json({ error: 'Ruxsat yo‘q' });
   if (error instanceof InsufficientBalanceError) return res.status(400).json({ error: 'Balansda yetarli mablag‘ yo‘q' });
   if (error instanceof ImageUploadError) return res.status(400).json({ error: error.message });
+  if (error instanceof PaymentProviderError) return res.status(503).json({ error: error.message });
   console.error('[Me] request failed:', error);
   return res.status(500).json({ error: config.isProd ? fallback : error?.message || fallback });
 }
@@ -160,8 +162,7 @@ router.post('/purchases', writeLimiter, async (req: Request, res: Response) => {
     res.json({
       transactionId: String(transaction._id),
       paymentProvider: transaction.paymentProvider,
-      paymentUrl: transaction.paymentReview ? null : transaction.paymentUrl || null,
-      paymentAmount: transaction.basePrice,
+      paymentAmount: transaction.uniqueAmount,
       product: { id: String(product._id), title: product.title, price: product.price },
       uniqueAmount,
       expiresAt,
@@ -278,7 +279,7 @@ router.get('/orders', async (req: Request, res: Response) => {
         status: t.status,
         title: (t.productId as any)?.title || 'Mahsulot',
         uniqueAmount: t.uniqueAmount,
-        paymentAmount: t.paymentProvider === 'tezcheck' ? t.basePrice : t.uniqueAmount,
+        paymentAmount: t.uniqueAmount,
         paymentProvider: t.paymentProvider,
         paymentReview: Boolean(t.paymentReview),
         createdAt: t.createdAt,
@@ -310,16 +311,17 @@ router.get('/transactions/:id/status', validateObjectId(), async (req: Request, 
 
     // The destination card is re-served while (and only while) the transfer is still owed, so
     // a buyer who closed the tab can finish paying without opening a second order.
-    const card =
-      transaction.status === 'pending_payment' && transaction.paymentProvider !== 'tezcheck'
-        ? config.paymentCards.find((c) => c.id === transaction.cardId) || config.paymentCards[0]
-        : null;
+    const open = transaction.status === 'pending_payment';
+    const card = !open
+      ? null
+      : transaction.paymentProvider === 'hamyon'
+        ? transaction.paymentCard ? { number: transaction.paymentCard, holder: '', bank: '' } : null
+        : config.paymentCards.find((c) => c.id === transaction.cardId) || config.paymentCards[0];
 
     res.json({
       status: transaction.status,
       paymentProvider: transaction.paymentProvider,
-      paymentUrl: transaction.status === 'pending_payment' && !transaction.paymentReview ? transaction.paymentUrl || null : null,
-      paymentAmount: transaction.basePrice,
+      paymentAmount: transaction.uniqueAmount,
       paymentReview: Boolean(transaction.paymentReview),
       title: (transaction.productId as any)?.title || 'Mahsulot',
       uniqueAmount: transaction.uniqueAmount,

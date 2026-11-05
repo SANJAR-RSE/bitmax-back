@@ -1,4 +1,4 @@
-import { tezcheckWebhook } from './routes/tezcheckWebhook';
+import { hamyonWebhook } from './routes/hamyonWebhook';
 import express, { NextFunction, Request, Response } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -27,7 +27,7 @@ app.use(
     allowedHeaders: ['Content-Type', 'Authorization', 'x-internal-key'],
   })
 );
-app.use(tezcheckWebhook); // Must precede JSON parsing: provider signs raw bytes.
+app.use(hamyonWebhook); // Before the global limiter: a throttled callback would delay a paid order.
 app.use(express.json({ limit: '100kb' }));
 
 app.use(healthRoutes);
