@@ -26,8 +26,13 @@ hamyonWebhook.post(
 
     const parsed = callbackSchema.safeParse(req.body);
     if (!parsed.success) {
-      console.error('[Hamyon] Callback rejected, fields:', Object.keys(req.body || {}).join(','));
-      return res.status(400).json({ error: 'Invalid callback' });
+      const b = req.body || {};
+      const shape = (v: unknown) => (typeof v === 'string' ? (/^[a-f\d]{24}$/i.test(v) ? 'hex24' : `str(${v.length})`) : typeof v);
+      console.error('[Hamyon] Callback rejected:', parsed.error.issues.map((i) => i.path.join('.')).join(','),
+        '| status', String(b.status || ''), 'reason', String(b.reason || ''), 'order_id', shape(b.order_id),
+        'payment_id', String(b.payment_id || ''), 'amount', String(b.amount || ''), 'sign', shape(b.sign));
+      // A prepare notice or a payment made outside this shop's orders: acknowledge, nothing to settle.
+      return res.status(b.status === 'prepare' || b.order_id ? 200 : 400).json({ result: 'ignored' });
     }
     const body = parsed.data;
     if (body.shop_id !== config.hamyon.shopId) return res.status(403).json({ error: 'Invalid shop' });

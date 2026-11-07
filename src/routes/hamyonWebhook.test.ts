@@ -34,7 +34,8 @@ test('callbacks are refused without the secret path, valid fields and this shop 
 
   try {
     assert.equal((await post('wrong', fields)).status, 404);
-    assert.equal((await post('path-secret', { ...fields, order_id: 'ORD-1' })).status, 400);
+    assert.equal((await post('path-secret', { ...fields, order_id: 'ORD-1' })).status, 200); // foreign order: acknowledged, ignored
+    assert.equal((await post('path-secret', {})).status, 400);
     const otherShop = { ...fields, shop_id: '13', sign: hamyonSign('13', 'p1', '50000', 'sk_x') };
     assert.equal((await post('path-secret', otherShop)).status, 403);
   } finally {
