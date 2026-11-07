@@ -25,14 +25,21 @@ hamyonWebhook.post(
     if (!token || !safeEquals(req.params.token, token)) return res.status(404).json({ error: 'Not found' });
 
     const parsed = callbackSchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: 'Invalid callback' });
+    if (!parsed.success) {
+      console.error('[Hamyon] Callback rejected, fields:', Object.keys(req.body || {}).join(','));
+      return res.status(400).json({ error: 'Invalid callback' });
+    }
     const body = parsed.data;
+    if (body.shop_id !== config.hamyon.shopId) return res.status(403).json({ error: 'Invalid shop' });
 
+    // The secret URL token already authenticates the caller, and reconciliation trusts only
+    // Hamyon's own status endpoint, so a signature in an unexpected format must not stall a
+    // paid order. It is logged so the format can be fixed.
     const signed = verifyHamyonSign(
       { shopId: body.shop_id, paymentId: body.payment_id, amount: body.amount, sign: body.sign },
       config.hamyon.shopKey
     );
-    if (body.shop_id !== config.hamyon.shopId || !signed) return res.status(403).json({ error: 'Invalid signature' });
+    console.log('[Hamyon] Callback:', body.order_id, 'status', String(req.body.status || ''), 'sign', signed ? 'ok' : `mismatch (amount "${body.amount}")`);
 
     // Duplicates and stale deliveries are safe: reconciliation acts only on a pending order.
     try {

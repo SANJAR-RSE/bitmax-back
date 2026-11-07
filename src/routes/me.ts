@@ -21,6 +21,7 @@ import { payoutService, InsufficientBalanceError } from '../services/payoutServi
 import { ledgerService } from '../services/ledgerService';
 import { describeRefundPolicy } from '../services/refundEngine';
 import { notificationService } from '../services/notificationService';
+import { checkHamyonOrder } from '../services/hamyonPayments';
 import { uploadImageBuffer, ImageUploadError } from '../services/cloudinaryService';
 import { CATEGORIES } from '../categories';
 import { config } from '../config';
@@ -298,6 +299,10 @@ router.get('/orders', async (req: Request, res: Response) => {
 router.get('/transactions/:id/status', validateObjectId(), async (req: Request, res: Response) => {
   try {
     const user = actor(req);
+    // Ask Hamyon directly while the buyer waits: callbacks and the sweep can both be late.
+    if (await Transaction.exists({ _id: req.params.id, buyerId: user._id, paymentProvider: 'hamyon', status: 'pending_payment' })) {
+      await checkHamyonOrder(req.params.id).catch(() => console.error('[Hamyon] Status check deferred:', req.params.id));
+    }
     const transaction = await Transaction.findOne({ _id: req.params.id, buyerId: user._id }).populate(
       'productId',
       'title'

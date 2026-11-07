@@ -55,6 +55,7 @@ export async function reconcileHamyonPayment(id: string) {
   const remote = await hamyonClient.getStatus(t.hamyonPaymentId);
   const sameShop = remote.shop_id === undefined || String(remote.shop_id) === config.hamyon.shopId;
   if (remote.payment_id !== t.hamyonPaymentId || remote.amount !== t.uniqueAmount || !sameShop) {
+    console.error('[Hamyon] Status mismatch:', id, { idMatch: remote.payment_id === t.hamyonPaymentId, remoteAmount: remote.amount, expected: t.uniqueAmount, sameShop });
     await Transaction.updateOne({ _id: t._id }, { $set: { paymentReview: 'hamyon_status_mismatch' } });
     return;
   }
@@ -64,6 +65,7 @@ export async function reconcileHamyonPayment(id: string) {
     return;
   }
   if (remote.status !== 'paid') return;
+  console.log('[Hamyon] Paid:', id);
 
   const session = await mongoose.startSession();
   let lostReservation = false;
@@ -90,10 +92,44 @@ export async function reconcileHamyonPayment(id: string) {
   } finally {
     await session.endSession();
   }
+  if (lostReservation) console.error('[Hamyon] Paid order lost its reservation:', id);
+  else await notifyHamyonPaid(id).catch(() => console.error('[Hamyon] Paid notice deferred:', id));
   // Real money arrived for a listing that is no longer held: a person has to decide.
   if (lostReservation) {
     await Transaction.updateOne({ _id: t._id }, { $set: { paymentReview: 'hamyon_paid_reservation_lost' } });
   }
+}
+
+/**
+ * Sends the "payment received" message with the reveal button exactly once. The row is claimed
+ * before sending, so the bot's watcher and the backend's sweep cannot both deliver it.
+ */
+export async function notifyHamyonPaid(id: string): Promise<boolean> {
+  const t = await Transaction.findOneAndUpdate(
+    { _id: id, status: { $in: ['paid', 'completed'] }, paymentNotifiedAt: { $exists: false } },
+    { $set: { paymentNotifiedAt: new Date() } },
+    { new: true }
+  );
+  if (!t) return false;
+  const [buyer, product, hold] = await Promise.all([
+    User.findById(t.buyerId),
+    Product.findById(t.productId),
+    EscrowHold.findOne({ transactionId: t._id }),
+  ]);
+  const sent = !!buyer?.telegramId && !!hold &&
+    await notificationService.notifyPaymentConfirmed(buyer.telegramId, product?.title || 'Mahsulot', t.basePrice, String(hold._id), hold.autoReleaseAt);
+  if (!sent) await Transaction.updateOne({ _id: t._id }, { $unset: { paymentNotifiedAt: '' } });
+  return sent;
+}
+
+/** Throttled reconcile for a buyer who is waiting right now (bot button, bot watcher, web poll). */
+export async function checkHamyonOrder(id: string, minIntervalMs = 5_000) {
+  const t = await Transaction.findById(id).select('paymentProvider status paymentReview hamyonCheckedAt');
+  if (t?.paymentProvider === 'hamyon' && t.status === 'pending_payment' && !t.paymentReview) {
+    const last = t.hamyonCheckedAt?.getTime() || 0;
+    if (Date.now() - last >= minIntervalMs) await reconcileHamyonPayment(id);
+  }
+  return Transaction.findById(id);
 }
 
 let sweeping = false;
@@ -121,16 +157,7 @@ export async function sweepHamyonPayments() {
     }
 
     const paid = await Transaction.find({ paymentProvider: 'hamyon', status: 'paid', paymentNotifiedAt: { $exists: false } }).limit(30);
-    for (const t of paid) {
-      const [buyer, product, hold] = await Promise.all([
-        User.findById(t.buyerId),
-        Product.findById(t.productId),
-        EscrowHold.findOne({ transactionId: t._id }),
-      ]);
-      if (!buyer?.telegramId || !hold) continue;
-      const notified = await notificationService.notifyPaymentConfirmed(buyer.telegramId, product?.title || 'Mahsulot', t.basePrice, String(hold._id), hold.autoReleaseAt);
-      if (notified) await Transaction.updateOne({ _id: t._id }, { $set: { paymentNotifiedAt: new Date() } });
-    }
+    for (const t of paid) await notifyHamyonPaid(String(t._id));
   } finally {
     sweeping = false;
   }
