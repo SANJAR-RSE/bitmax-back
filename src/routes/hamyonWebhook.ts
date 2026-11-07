@@ -39,7 +39,7 @@ hamyonWebhook.post(
       { shopId: body.shop_id, paymentId: body.payment_id, amount: body.amount, sign: body.sign },
       config.hamyon.shopKey
     );
-    console.log('[Hamyon] Callback:', body.order_id, 'status', String(req.body.status || ''), 'sign', signed ? 'ok' : `mismatch (amount "${body.amount}")`);
+    console.log('[Hamyon] Callback:', body.order_id, 'payment', body.payment_id, 'amount', body.amount, 'status', String(req.body.status || ''), 'sign', signed ? 'ok' : `mismatch (amount "${body.amount}")`);
 
     // Duplicates and stale deliveries are safe: reconciliation acts only on a pending order.
     try {
